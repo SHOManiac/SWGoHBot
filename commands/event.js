@@ -9,7 +9,7 @@ exports.run = (client, message, args, level) => {
     const guildConf = guildSettings.get(message.guild.id);
     var events = guildEvents.get(message.guild.id);
 
-    const actions = ['create', 'view', 'delete', 'help'];
+    const actions = ['create', 'view', 'delete', 'help', 'trigger'];
 
     if (!events) {
         guildEvents.set(message.guild.id, {});
@@ -34,7 +34,7 @@ exports.run = (client, message, args, level) => {
     if (!args[0] || !actions.includes(args[0].toLowerCase())) return message.channel.send(`Valid actions are \`${actions.join(', ')}\`.`).then(msg => msg.delete(10000)).catch(console.error);
     action = args[0].toLowerCase();
 
-    if (action === "create" || action === "delete") {
+    if (action === "create" || action === "delete" || action === "trigger") {
         if (level < 3) {  // Permlevel 3 is the adminRole of the server, so anyone under that shouldn't be able to use these
             return message.channel.send(`Sorry, but either you're not an admin, or your server leader has not set up the configs.\nYou cannot add or remove an event unless you have the configured admin role.`);
         }
@@ -97,7 +97,23 @@ exports.run = (client, message, args, level) => {
             if (!args[4]) {
                 eventMessage = "";
             } else {
-                eventMessage = args.splice(4).join(" ");
+                let newArgs = message.content.split(' ');
+                let specialArgs = ['--channel', '--repeat'];
+                let newLen = newArgs.length;
+                for(var ix = 0; ix < newLen; ix++) {
+                    specialArgs.forEach(specA => {
+                        if(newArgs[ix].indexOf(specA) > -1) {
+                            newArgs[ix] = newArgs[ix].replace(specA, '');
+                            if(newArgs[ix+1].indexOf('\n') > -1) {
+                                newArgs[ix+1] = newArgs[ix+1].substring(newArgs[ix+1].indexOf('\n'));
+                            } else {
+                                newArgs.splice(ix+1, 1);
+                                newLen--;
+                            }
+                        }
+                    });
+                }
+                eventMessage = newArgs.splice(5).join(" ");
             }
 
             eventDate = moment.tz(`${eventDay} ${eventTime}`, 'YYYY-MM-DD HH:mm', guildConf['timezone']);
@@ -166,6 +182,30 @@ exports.run = (client, message, args, level) => {
                 guildEvents.set(message.guild.id, events);
                 return message.channel.send(`Deleted event: ${eventName}`);
             }
+        } case "trigger": {
+            if (!args[1]) return message.channel.send(`You must give an event name to trigger.`).then(msg => msg.delete(10000)).catch(console.error);
+            eventName = args[1];
+
+            // Check if that name/ event already exists
+            if (!events.hasOwnProperty(eventName)) {
+                return message.channel.send(`That event does not exist.`).then(msg => msg.delete(10000)).catch(console.error);
+            } else {
+                var channel = '';
+                const event = events[eventName];
+                var announceMessage = `**${eventName}**\n${event.eventMessage}`;
+                if (event['eventChan'] && event.eventChan !== '') {  // If they've set a channel, try using it
+                    channel = message.guild.channels.find('name', event.eventChan);
+                } else { // Else, use the default one from their settings
+                    channel = thisGuild.channels.find('name', guildConf["announceChan"]);
+                }
+                if (channel && channel.permissionsFor(message.guild.me).has(["SEND_MESSAGES", "READ_MESSAGES"])) {
+                    try {
+                        return channel.send(announceMessage);
+                    } catch (e) {
+                        client.log('Event Broke!', announceMessage);
+                    }
+                }
+            }
         }
         case "help": {
             return message.channel.send(`**Extended help for ${this.help.name}** \n**Usage**: ${this.help.usage} \n${this.help.extended}`);
@@ -184,13 +224,14 @@ exports.help = {
     name: 'event',
     category: 'Misc',
     description: 'Used to make or check an event',
-    usage: 'event <create|view|delete> <eventName> <eventDay> <eventTime> <eventMessage> [--repeat 00d00h00m] [--channel channelName]',
+    usage: 'event <create|view|delete|trigger|help> <eventName> <eventDay> <eventTime> [--repeat 00d00h00m] [--channel channelName] [eventMessage]',
     extended: `\`\`\`md
 create :: Create a new event listing.
     --repeat  :: Lets you set a duration. It will repeat after that time has passed.
     --channel :: Lets you set a specific channel for the event to announce on.
 view   :: View your current event listings.
 delete :: Delete an event.
+trigger:: Trigger an event in the specified channel, leaves the event alone.
 help   :: Shows this message.\`\`\``,
     example: 'event create FirstEvent 7/2/2017 13:56 This is my event message'
 };
